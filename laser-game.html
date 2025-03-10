@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Laser with Rotatable Mirrors</title>
+    <style>
+        canvas { border: 1px solid black; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let laserStart = { x: 0, y: 300 };
+        let target = { x: 400, y: 300 };
+
+        const mirrors = [];
+        for (let i = 0; i < 50; i++) {
+            const isVertical = Math.random() > 0.5;
+            mirrors.push({
+                x: Math.random() * (canvas.width - 100) + 50,
+                y: Math.random() * (canvas.height - 100) + 50,
+                width: isVertical ? 10 : Math.random() * 70 + 30,
+                height: isVertical ? Math.random() * 70 + 30 : 10,
+                angle: Math.random() * Math.PI * 2
+            });
+        }
+
+        function rotatePoint(point, center, angle) {
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+            const dx = point.x - center.x;
+            const dy = point.y - center.y;
+            return {
+                x: center.x + dx * cosA - dy * sinA,
+                y: center.y + dx * sinA + dy * cosA
+            };
+        }
+
+        function lineIntersectsRotatedRect(p1, p2, mirror) {
+            const center = { x: mirror.x + mirror.width/2, y: mirror.y + mirror.height/2 };
+            const corners = [
+                { x: mirror.x, y: mirror.y },
+                { x: mirror.x + mirror.width, y: mirror.y },
+                { x: mirror.x + mirror.width, y: mirror.y + mirror.height },
+                { x: mirror.x, y: mirror.y + mirror.height }
+            ].map(p => rotatePoint(p, center, mirror.angle));
+
+            for (let i = 0; i < 4; i++) {
+                const j = (i + 1) % 4;
+                const intersect = lineLineIntersection(p1, p2, corners[i], corners[j]);
+                if (intersect) {
+                    const dx = corners[j].x - corners[i].x;
+                    const dy = corners[j].y - corners[i].y;
+                    const normalAngle = Math.atan2(dy, dx) + Math.PI/2;
+                    return { x: intersect.x, y: intersect.y, normal: normalAngle };
+                }
+            }
+            return null;
+        }
+
+        function lineLineIntersection(p1, p2, p3, p4) {
+            const denom = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+            if (Math.abs(denom) < 1e-10) return null;
+            
+            const t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / denom;
+            const u = -((p1.x - p2.x) * (p1.y - p3.y) - (p1.y - p2.y) * (p1.x - p3.x)) / denom;
+            
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+                return {
+                    x: p1.x + t * (p2.x - p1.x),
+                    y: p1.y + t * (p2.y - p1.y)
+                };
+            }
+            return null;
+        }
+
+        function reflectLaser(start, end) {
+            let points = [start];
+            let currentStart = { ...start };
+            let currentEnd = { ...end };
+            let remainingMirrors = [...mirrors];
+            let hitCount = 0;
+
+            while (hitCount < mirrors.length) {
+                let nearestIntersect = null;
+                let nearestMirrorIndex = -1;
+                let minDist = Infinity;
+
+                remainingMirrors.forEach((mirror, index) => {
+                    const intersect = lineIntersectsRotatedRect(currentStart, currentEnd, mirror);
+                    if (intersect) {
+                        const dist = Math.hypot(intersect.x - currentStart.x, intersect.y - currentStart.y);
+                        if (dist < minDist && dist > 1e-5) {
+                            minDist = dist;
+                            nearestIntersect = intersect;
+                            nearestMirrorIndex = index;
+                        }
+                    }
+                });
+
+                if (!nearestIntersect) break;
+
+                points.push(nearestIntersect);
+                
+                const incidentAngle = Math.atan2(currentEnd.y - currentStart.y, currentEnd.x - currentStart.x);
+                const reflectionAngle = 2 * nearestIntersect.normal - incidentAngle - Math.PI;
+                
+                const reflectDist = Math.hypot(canvas.width, canvas.height);
+                currentEnd = {
+                    x: nearestIntersect.x + Math.cos(reflectionAngle) * reflectDist,
+                    y: nearestIntersect.y + Math.sin(reflectionAngle) * reflectDist
+                };
+                
+                currentStart = { ...nearestIntersect };
+                remainingMirrors.splice(nearestMirrorIndex, 1);
+                hitCount++;
+            }
+
+            points.push(currentEnd);
+            return points;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const path = reflectLaser(laserStart, target);
+
+            ctx.beginPath();
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x, path[i].y);
+            }
+            ctx.stroke();
+
+            mirrors.forEach(mirror => {
+                ctx.save();
+                ctx.translate(mirror.x + mirror.width/2, mirror.y + mirror.height/2);
+                ctx.rotate(mirror.angle);
+                ctx.fillStyle = 'silver';
+                ctx.fillRect(-mirror.width/2, -mirror.height/2, mirror.width, mirror.height);
+                ctx.restore();
+            });
+
+            ctx.beginPath();
+            ctx.fillStyle = 'blue';
+            ctx.arc(target.x, target.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.fillStyle = 'red';
+            ctx.arc(laserStart.x, laserStart.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            laserStart.x = e.clientX - rect.left;
+            laserStart.y = e.clientY - rect.top;
+            draw();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            target.x = e.clientX - rect.left;
+            target.y = e.clientY - rect.top;
+            draw();
+        });
+
+        draw();
+    </script>
+</body>
+</html>
