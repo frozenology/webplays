@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Drawing Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .canvas-container {
+            position: relative;
+            border: 1px solid #ccc;
+        }
+        canvas {
+            cursor: crosshair;
+        }
+        .toolbar-btn {
+            margin: 0 5px;
+            font-size: 1.2em;
+        }
+        .selected {
+            border: 2px dashed blue;
+        }
+        .resize-handle {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            background: blue;
+            cursor: pointer;
+        }
+        .move-handle {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            background: blue;
+            cursor: move;
+        }
+        .rotate-handle {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            background: green;
+            cursor: pointer;
+        }
+        .handle-left { cursor: ew-resize; }
+        .handle-right { cursor: ew-resize; }
+        .handle-top { cursor: ns-resize; }
+        .handle-bottom { cursor: ns-resize; }
+        .handle-left-top { cursor: nwse-resize; }
+        .handle-right-top { cursor: nesw-resize; }
+        .handle-left-bottom { cursor: nesw-resize; }
+        .handle-right-bottom { cursor: nwse-resize; }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="toolbar mb-3 d-flex justify-content-between">
+            <div>
+                <button class="btn btn-primary toolbar-btn" id="selectBtn" title="Select">✋</button>
+                <button class="btn btn-primary toolbar-btn" id="pointBtn" title="Point">✏️</button>
+                <button class="btn btn-primary toolbar-btn" id="squareBtn" title="Square">⬜</button>
+                <button class="btn btn-primary toolbar-btn" id="circleBtn" title="Circle">⭕</button>
+                <button class="btn btn-primary toolbar-btn" id="imageBtn" title="Image">🖼️</button>
+                <input type="file" id="imageInput" accept="image/*" style="display: none;">
+            </div>
+            <button class="btn btn-success toolbar-btn" id="saveBtn" title="Save">💾</button>
+        </div>
+        <div class="canvas-container">
+            <canvas id="drawingCanvas" width="800" height="600"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.min.js"></script>
+    
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const selectBtn = document.getElementById('selectBtn');
+        const pointBtn = document.getElementById('pointBtn');
+        const squareBtn = document.getElementById('squareBtn');
+        const circleBtn = document.getElementById('circleBtn');
+        const imageBtn = document.getElementById('imageBtn');
+        const imageInput = document.getElementById('imageInput');
+        const saveBtn = document.getElementById('saveBtn');
+
+        let currentTool = 'point';
+        let isDrawing = false;
+        let startX, startY;
+        let selected = null;
+        const Drawable = function(x, y, width, height, angle = 0) {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+            this.angle = angle;
+        };
+        const drawables = [];
+
+        [selectBtn, pointBtn, squareBtn, circleBtn, imageBtn].forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentTool = btn.id.replace('Btn', '');
+                if (currentTool === 'image') {
+                    imageInput.click();
+                }
+            });
+        });
+
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const img = new Image();
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        const drawable = new Drawable(0, 0, img.width, img.height);
+                        drawable.img = img;
+                        drawables.push(drawable);
+                        selected = drawable;
+                        currentTool = 'imageSizing';
+                        draw();
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', drawShape);
+        canvas.addEventListener('mouseup', stopDrawing);
+
+        function startDrawing(e) {
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            isDrawing = true;
+
+            if (currentTool === 'select') {
+                selected = drawables.find(drawable => 
+                    startX >= drawable.x && startX <= drawable.x + drawable.width &&
+                    startY >= drawable.y && startY <= drawable.y + drawable.height
+                );
+                draw();
+            } else if (currentTool === 'imageSizing' && selected) {
+                selected.x = startX;
+                selected.y = startY;
+                selected.width = 0;
+                selected.height = 0;
+            }
+        }
+
+        function drawShape(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            draw();
+
+            if (currentTool === 'point') {
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            } else if (currentTool === 'square') {
+                ctx.strokeRect(startX, startY, x - startX, y - startY);
+            } else if (currentTool === 'circle') {
+                const radius = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+                ctx.beginPath();
+                ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                ctx.stroke();
+            } else if (currentTool === 'imageSizing' && selected) {
+                selected.width = x - selected.x;
+                selected.height = y - selected.y;
+            }
+        }
+
+        function stopDrawing(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (currentTool === 'square') {
+                const drawable = new Drawable(startX, startY, x - startX, y - startY);
+                drawable.type = 'square';
+                drawables.push(drawable);
+                selected = drawable;
+            } else if (currentTool === 'circle') {
+                const radius = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+                const drawable = new Drawable(startX - radius, startY - radius, radius * 2, radius * 2);
+                drawable.type = 'circle';
+                drawables.push(drawable);
+                selected = drawable;
+            } else if (currentTool === 'imageSizing') {
+                currentTool = 'select';
+            }
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawables.forEach(drawable => {
+                ctx.save();
+                ctx.translate(drawable.x + drawable.width/2, drawable.y + drawable.height/2);
+                ctx.rotate(drawable.angle);
+                ctx.translate(-(drawable.x + drawable.width/2), -(drawable.y + drawable.height/2));
+
+                if (drawable.img) {
+                    ctx.drawImage(drawable.img, drawable.x, drawable.y, drawable.width, drawable.height);
+                } else if (drawable.type === 'square') {
+                    ctx.strokeRect(drawable.x, drawable.y, drawable.width, drawable.height);
+                } else if (drawable.type === 'circle') {
+                    ctx.beginPath();
+                    ctx.arc(drawable.x + drawable.width/2, drawable.y + drawable.height/2, 
+                           drawable.width/2, 0, 2 * Math.PI);
+                    ctx.stroke();
+                }
+                
+                if (drawable === selected) {
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeStyle = 'blue';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(drawable.x, drawable.y, drawable.width, drawable.height);
+                    ctx.setLineDash([]);
+                    
+                    ctx.fillStyle = 'blue';
+                    ctx.fillRect(drawable.x - 9, drawable.y + drawable.height/2 - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width - 9, drawable.y + drawable.height/2 - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width/2 - 9, drawable.y - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width/2 - 9, drawable.y + drawable.height - 9, 18, 18);
+                    ctx.fillRect(drawable.x - 9, drawable.y - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width - 9, drawable.y - 9, 18, 18);
+                    ctx.fillRect(drawable.x - 9, drawable.y + drawable.height - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width - 9, drawable.y + drawable.height - 9, 18, 18);
+                    ctx.fillRect(drawable.x + drawable.width/2 - 14, drawable.y + drawable.height/2 - 14, 28, 28);
+                    
+                    ctx.fillStyle = 'green';
+                    ctx.fillRect(drawable.x + drawable.width/2 - 9, drawable.y - 23, 18, 18);
+                }
+                ctx.restore();
+            });
+        }
+
+        let isResizing = false;
+        let isMoving = false;
+        let isRotating = false;
+        let resizeDirection = '';
+        canvas.addEventListener('mousedown', (e) => {
+            if (selected && currentTool === 'select') {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                if ((x - (selected.x + selected.width/2)) < 14 && (y - (selected.y + selected.height/2)) < 14) {
+                    isMoving = true;
+                } else if (Math.abs(x - (selected.x + selected.width/2)) < 9 && Math.abs(y - (selected.y - 14)) < 9) {
+                    isRotating = true;
+                } else if (Math.abs(x - selected.x) < 9 && Math.abs(y - (selected.y + selected.height/2)) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'left';
+                } else if (Math.abs(x - (selected.x + selected.width)) < 9 && Math.abs(y - (selected.y + selected.height/2)) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'right';
+                } else if (Math.abs(y - selected.y) < 9 && Math.abs(x - (selected.x + selected.width/2)) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'top';
+                } else if (Math.abs(y - (selected.y + selected.height)) < 9 && Math.abs(x - (selected.x + selected.width/2)) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'bottom';
+                } else if (Math.abs(x - selected.x) < 9 && Math.abs(y - selected.y) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'left-top';
+                } else if (Math.abs(x - (selected.x + selected.width)) < 9 && Math.abs(y - selected.y) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'right-top';
+                } else if (Math.abs(x - selected.x) < 9 && Math.abs(y - (selected.y + selected.height)) < 9) {
+                    isResizing = true;
+                    resizeDirection = 'left-bottom';
+                } else if (Math.abs(x - (selected.x + selected.width)) < 9 && Math.abs(y - (selected.y + selected.height)) > 9) {
+                    isResizing = true;
+                    resizeDirection = 'right-bottom';
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isResizing && selected) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                switch(resizeDirection) {
+                    case 'left':
+                        selected.width += selected.x - x;
+                        selected.x = x;
+                        break;
+                    case 'right':
+                        selected.width = x - selected.x;
+                        break;
+                    case 'top':
+                        selected.height += selected.y - y;
+                        selected.y = y;
+                        break;
+                    case 'bottom':
+                        selected.height = y - selected.y;
+                        break;
+                    case 'left-top':
+                        selected.width += selected.x - x;
+                        selected.height += selected.y - y;
+                        selected.x = x;
+                        selected.y = y;
+                        break;
+                    case 'right-top':
+                        selected.width = x - selected.x;
+                        selected.height += selected.y - y;
+                        selected.y = y;
+                        break;
+                    case 'left-bottom':
+                        selected.width += selected.x - x;
+                        selected.x = x;
+                        selected.height = y - selected.y;
+                        break;
+                    case 'right-bottom':
+                        selected.width = x - selected.x;
+                        selected.height = y - selected.y;
+                        break;
+                }
+                draw();
+            } else if (isMoving && selected) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                selected.x = x - selected.width/2;
+                selected.y = y - selected.height/2;
+                draw();
+            } else if (isRotating && selected) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const centerX = selected.x + selected.width/2;
+                const centerY = selected.y + selected.height/2;
+                selected.angle = Math.atan2(y - centerY, x - centerX) - Math.PI/2;
+                draw();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isResizing = false;
+            isMoving = false;
+            isRotating = false;
+            resizeDirection = '';
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Delete' && selected) {
+                const index = drawables.indexOf(selected);
+                if (index > -1) {
+                    drawables.splice(index, 1);
+                    selected = null;
+                    draw();
+                }
+            }
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const dataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = 'canvas-drawing.png';
+            link.href = dataURL;
+            link.click();
+        });
+    </script>
+</body>
+</html>
