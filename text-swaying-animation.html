@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Swaying Zoom Text Animation</title>
+    <style>
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background: #000;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders:opsz,wght@10..72,100..900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 800;
+        canvas.height = 600;
+
+        let time = 0;
+        const text = "❄︎Frozenology❄︎";
+        let swayVelX = 0;
+        let swayVelY = 0;
+        let posX = 0;
+        let posY = 0;
+        let isDragging = false;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        // Mouse event listeners
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            updateMousePosition(e);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                updateMousePosition(e);
+                // Calculate pull towards mouse position
+                const dx = mouseX - posX;
+                const dy = mouseY - posY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0) {
+                    const force = Math.min(10, distance + 1);
+                    swayVelX += (dx / distance) * force;
+                    swayVelY += (dy / distance) * force;
+                  console.log(force);
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        function updateMousePosition(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left - canvas.width/2;
+            mouseY = e.clientY - rect.top - canvas.height/2;
+        }
+        
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const zoom = 1 + Math.sin(time * 0.03) * 0.15;
+            
+            if (Math.random() < 0.1) {
+                swayVelX += (Math.random() - 0.5) * 1000;
+                swayVelY += (Math.random() - 0.5) * 1000;
+            }
+
+            swayVelX = Math.max(Math.min(swayVelX, 5), -5);
+            swayVelY = Math.max(Math.min(swayVelY, 5), -5);
+          
+             posX += swayVelX;
+            posY += swayVelY;
+          
+            swayVelX *= 0.68;
+            swayVelY *= 0.68;
+
+            ctx.font = `${120 * zoom}px Big Shoulders`;
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            ctx.save();
+            
+            ctx.translate(canvas.width/2 + posX, canvas.height/2 + posY);
+            ctx.rotate(Math.sin(time * 0.02) * 0.1);
+            
+            ctx.fillText(text, 0, 0);
+            
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.33)';
+            ctx.shadowBlur = 10;
+            ctx.fillText(text, 0, 0);
+
+            ctx.restore();
+
+            time++;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
