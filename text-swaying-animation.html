@@ -6,7 +6,7 @@
         canvas {
             display: block;
             margin: 0 auto;
-            background: #000;
+            background: red;
         }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,7 +21,7 @@
         const ctx = canvas.getContext('2d');
 
         canvas.width = 800;
-        canvas.height = 600;
+        canvas.height = 240;
 
         let time = 0;
         const text = "❄︎Frozenology❄︎";
@@ -33,6 +33,10 @@
         let mouseX = 0;
         let mouseY = 0;
 
+        // Store previous positions for motion blur
+        const blurTrail = [];
+        const maxTrailLength = 10;
+
         // Mouse event listeners
         canvas.addEventListener('mousedown', (e) => {
             isDragging = true;
@@ -42,7 +46,6 @@
         canvas.addEventListener('mousemove', (e) => {
             if (isDragging) {
                 updateMousePosition(e);
-                // Calculate pull towards mouse position
                 const dx = mouseX - posX;
                 const dy = mouseY - posY;
                 const distance = Math.sqrt(dx * dx + dy * dy);
@@ -51,7 +54,6 @@
                     const force = Math.min(10, distance + 1);
                     swayVelX += (dx / distance) * force;
                     swayVelY += (dy / distance) * force;
-                  console.log(force);
                 }
             }
         });
@@ -71,7 +73,8 @@
         }
         
         function animate() {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            // Increase transparency for more pronounced blur effect
+            ctx.fillStyle = 'rgba(128, 128, 161, 0.35)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             const zoom = 1 + Math.sin(time * 0.03) * 0.15;
@@ -83,29 +86,51 @@
 
             swayVelX = Math.max(Math.min(swayVelX, 5), -5);
             swayVelY = Math.max(Math.min(swayVelY, 5), -5);
-          
-             posX += swayVelX;
+            
+            posX += swayVelX;
             posY += swayVelY;
-          
+            
+            posX *= 0.98;
+            posY *= 0.98;
+
             swayVelX *= 0.68;
             swayVelY *= 0.68;
 
+            // Add current position to trail
+            blurTrail.push({ x: posX, y: posY });
+            if (blurTrail.length > maxTrailLength) {
+                blurTrail.shift();
+            }
+
             ctx.font = `${120 * zoom}px Big Shoulders`;
-            ctx.fillStyle = 'white';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
+            // Draw blur trail
+            for (let i = 0; i < blurTrail.length; i++) {
+                ctx.save();
+                const alpha = (i + 1) / (maxTrailLength * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.shadowColor = `rgba(255, 255, 255, ${alpha})`;
+                ctx.shadowBlur = 10 + (i * 2);
+                
+                ctx.translate(canvas.width/2 + blurTrail[i].x, canvas.height/2 + blurTrail[i].y);
+                ctx.rotate(Math.sin(time * 0.02) * 0.1);
+                
+                ctx.fillText(text, 0, 0);
+                ctx.restore();
+            }
+
+            // Draw main text
             ctx.save();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.13)';
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.13)';
+            ctx.shadowBlur = 20;
             
             ctx.translate(canvas.width/2 + posX, canvas.height/2 + posY);
             ctx.rotate(Math.sin(time * 0.02) * 0.1);
             
             ctx.fillText(text, 0, 0);
-            
-            ctx.shadowColor = 'rgba(255, 255, 255, 0.33)';
-            ctx.shadowBlur = 10;
-            ctx.fillText(text, 0, 0);
-
             ctx.restore();
 
             time++;
