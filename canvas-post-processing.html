@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Canvas Drawing with CRT Shader</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="drawCanvas"></canvas>
+
+    <script>
+        function attachCanvasEffects(canvas2d, effects, renderer) {
+            const glCanvas = document.createElement('canvas');
+            document.body.appendChild(glCanvas);
+
+            canvas2d.width = glCanvas.width = document.documentElement.clientWidth;
+            canvas2d.height = glCanvas.height = document.documentElement.clientHeight;
+
+            canvas2d.style.display = 'none';
+
+            function resizeCanvas() {
+                canvas2d.width = glCanvas.width = document.documentElement.clientWidth;
+                canvas2d.height = glCanvas.height = document.documentElement.clientHeight;
+                gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+            }
+            window.addEventListener('resize', resizeCanvas);
+
+            const ctx = canvas2d.getContext('2d');
+            const gl = glCanvas.getContext('webgl');
+
+            const vertexShaderSource = `
+                attribute vec2 a_position;
+                varying vec2 v_texCoord;
+                void main() {
+                    gl_Position = vec4(a_position, 0.0, 1.0);
+                    v_texCoord = a_position * vec2(0.5, -0.5) + vec2(0.5, 0.5);
+                }
+            `;
+
+
+            let shaderModules = {};
+
+            function attachShader(name, src) {
+                shaderModules[name] = src;
+            }
+
+            const effectShaders = {
+                noiseFunctions: `
+                    float random(vec2 st) {
+                        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+                    }
+
+                    float noise(vec2 st) {
+                        vec2 i = floor(st);
+                        vec2 f = fract(st);
+                        vec2 u = f * f * (3.0 - 2.0 * f);
+                        return mix(mix(random(i + vec2(0.0, 0.0)), 
+                                    random(i + vec2(1.0, 0.0)), u.x),
+                                mix(random(i + vec2(0.0, 1.0)), 
+                                    random(i + vec2(1.0, 1.0)), u.x), u.y);
+                    }
+                `,
+                curve: (params = { angle: 6.0, offset: 4.0 }) => `
+                    vec2 curve(vec2 uv) {
+                        uv = uv * 2.0 - 1.0;
+                        vec2 offset = abs(uv.yx) / vec2(${params.angle}, ${params.offset});
+                        uv = uv + uv * offset * offset;
+                        uv = uv * 0.5 + 0.5;
+                        return uv;
+                    }
+                `,
+                distort: (params = { value: 0.005 }) => `
+                    vec2 distort(vec2 uv) {
+                        float strength = ${params.value};
+                        uv.x += noise(vec2(uv.y * 10.0, u_time * 2.0)) * strength;
+                        uv.y += noise(vec2(uv.x * 10.0, u_time * 2.0 + 100.0)) * strength;
+                        return uv;
+                    }
+                `,
+                chromatic: (params = { value: 0.005 }) => `
+                    vec4 applyChromatic(vec2 uv, vec4 color) {
+                        vec2 caOffset = (uv - 0.5) * vec2(${params.value});
+                        color.r = texture2D(u_texture, uv + caOffset).r;
+                        color.g = texture2D(u_texture, uv).g;
+                        color.b = texture2D(u_texture, uv - caOffset).b;
+                        return color;
+                    }
+                `,
+                scanlines: (params = { size: 2.0, gap: 0.02 }) => `
+                    vec4 applyScanlines(vec2 uv, vec4 color) {
+                        float scanline = sin(uv.y * u_resolution.y * float(${params.size}) + u_time) * float(${params.gap});
+                        color.rgb += vec3(scanline);
+                        return color;
+                    }
+                `,
+                vsync: (params = { width: 0.2, scale: 0.5 }) => `
+                    vec4 applyVsync(vec2 uv, vec4 color) {
+                        float vsyncPos = fract(u_time * float(${params.scale}));
+                        float vsyncWidth = float(${params.width});
+                        float vsyncEffect = smoothstep(vsyncPos - vsyncWidth, vsyncPos, uv.y) * 
+                                          smoothstep(vsyncPos + vsyncWidth, vsyncPos, uv.y);
+                        color.rgb += vec3(vsyncEffect * 0.2);
+                        return color;
+                    }
+                `,
+                specular: (params = { lightPos: [0.2, 0.8], center: 0.3, color: [1.0, 1.0, 1.0] }) => `
+                    vec4 applySpecular(vec2 uv, vec4 color) {
+                        vec2 lightPos = vec2(${params.lightPos[0]}, ${params.lightPos[1]});
+                        vec2 toLight = lightPos - uv;
+                        float dist = length(toLight);
+                        float specular = pow(max(0.0, dot(normalize(toLight), vec2(0.0, 1.0))), 32.0);
+                        float specIntensity = smoothstep(${params.center}, 0.1, dist) * specular * 0.3;
+                        color.rgb += vec3(${params.color[0]}, ${params.color[1]}, ${params.color[2]}) * specIntensity;
+                        return color;
+                    }
+                `,
+                vignette: (params = { value: 0.5 }) => `
+                    vec4 applyVignette(vec2 uv, vec4 color) {
+                        vec2 vigUV = uv * 2.0 - 1.0;
+                        float vignette = smoothstep(0.0, 1.0, length(vigUV));
+                        color.rgb *= (1.0 - vignette * ${params.value});
+                        return color;
+                    }
+                `,
+                tint: (params = { red: 0.8, green: 0.7, blue: 1.0 }) => `
+                    vec4 applyTint(vec2 uv, vec4 color) {
+                        vec3 tintColor = vec3(${params.red}, ${params.green}, ${params.blue});
+                        color.rgb *= tintColor;
+                        return color;
+                    }
+                `,
+                exposure: (params = { value: 1.2 }) => `
+                    vec4 applyExposure(vec2 uv, vec4 color) {
+                        float exposure = ${params.value};
+                        color.rgb = vec3(1.0) - exp(-color.rgb * exposure);
+                        return color;
+                    }
+                `,
+                contrast: (params = { value: 1.0 }) => `
+                    vec4 applyContrast(vec2 uv, vec4 color) {
+                        float contrast = ${params.value};
+                        color.rgb = (color.rgb - 0.5) * contrast + 0.5;
+                        return color;
+                    }
+                `,
+                gamma: (params = { value: 1.0 }) => `
+                    vec4 applyGamma(vec2 uv, vec4 color) {
+                        float gamma = ${params.value};
+                        color.rgb = pow(color.rgb, vec3(1.0/gamma));
+                        return color;
+                    }
+                `,
+                brightness: (params = { value: 0.0 }) => `
+                    vec4 applyBrightness(vec2 uv, vec4 color) {
+                        color.rgb += vec3(${params.value});
+                        return color;
+                    }
+                `
+            };
+
+            let mainBody = 'vec2 uv = v_texCoord;\n';
+            Object.keys(effects).forEach(effect => {
+                switch(effect) {
+                    case 'curve':
+                        attachShader('curve', effectShaders.curve(effects[effect]));
+                        mainBody += 'uv = curve(uv);\n';
+                        break;
+                    case 'distort':
+                        attachShader('noiseFunctions', effectShaders.noiseFunctions);
+                        attachShader('distort', effectShaders.distort(effects[effect]));
+                        mainBody += 'uv = distort(uv);\n';
+                        break;
+                    case 'chromatic':
+                        attachShader('chromatic', effectShaders.chromatic(effects[effect]));
+                        break;
+                    case 'scanlines':
+                        attachShader('scanlines', effectShaders.scanlines(effects[effect]));
+                        break;
+                    case 'vsync':
+                        attachShader('vsync', effectShaders.vsync(effects[effect]));
+                        break;
+                    case 'specular':
+                        attachShader('specular', effectShaders.specular(effects[effect]));
+                        break;
+                    case 'vignette':
+                        attachShader('vignette', effectShaders.vignette(effects[effect]));
+                        break;
+                    case 'tint':
+                        attachShader('tint', effectShaders.tint(effects[effect]));
+                        break;
+                    case 'exposure':
+                        attachShader('exposure', effectShaders.exposure(effects[effect]));
+                        break;
+                    case 'contrast':
+                        attachShader('contrast', effectShaders.contrast(effects[effect]));
+                        break;
+                    case 'gamma':
+                        attachShader('gamma', effectShaders.gamma(effects[effect]));
+                        break;
+                    case 'brightness':
+                        attachShader('brightness', effectShaders.brightness(effects[effect]));
+                        break;
+                }
+            });
+
+            mainBody += 'vec4 color = texture2D(u_texture, uv);\n';
+            
+            Object.keys(effects).forEach(effect => {
+                switch(effect) {
+                    case 'chromatic':
+                        mainBody += 'color = applyChromatic(uv, color);\n';
+                        break;
+                    case 'scanlines':
+                        mainBody += 'color = applyScanlines(uv, color);\n';
+                        break;
+                    case 'vsync':
+                        mainBody += 'color = applyVsync(uv, color);\n';
+                        break;
+                    case 'specular':
+                        mainBody += 'color = applySpecular(uv, color);\n';
+                        break;
+                    case 'vignette':
+                        mainBody += 'color = applyVignette(uv, color);\n';
+                        break;
+                    case 'tint':
+                        mainBody += 'color = applyTint(uv, color);\n';
+                        break;
+                    case 'exposure':
+                        mainBody += 'color = applyExposure(uv, color);\n';
+                        break;
+                    case 'contrast':
+                        mainBody += 'color = applyContrast(uv, color);\n';
+                        break;
+                    case 'gamma':
+                        mainBody += 'color = applyGamma(uv, color);\n';
+                        break;
+                    case 'brightness':
+                        mainBody += 'color = applyBrightness(uv, color);\n';
+                        break;
+                }
+            });
+
+            mainBody += `
+                if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+                    color = vec4(0.0);
+                }
+                gl_FragColor = color;
+            `;
+
+            const fragmentShaderSource = `
+                precision mediump float;
+                varying vec2 v_texCoord;
+                uniform sampler2D u_texture;
+                uniform vec2 u_resolution;
+                uniform float u_time;
+
+                ${Object.values(shaderModules).join('\n')}
+
+                void main() {
+                    ${mainBody}
+                }
+            `;
+          
+          
+
+            function createShader(gl, type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.log(source);
+
+                    console.log(`Shader compile error (${type === gl.VERTEX_SHADER ? 'vertex' : 'fragment'}): ${gl.getShaderInfoLog(shader)}`);
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+            if (!vertexShader || !fragmentShader) {
+                return null;
+            }
+
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.log(`Program link error: ${gl.getProgramInfoLog(program)}`);
+                return null;
+            }
+            gl.useProgram(program);
+
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            const positions = [
+                -1, -1,
+                 1, -1,
+                -1,  1,
+                -1,  1,
+                 1, -1,
+                 1,  1,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const positionLocation = gl.getAttribLocation(program, 'a_position');
+            gl.enableVertexAttribArray(positionLocation);
+            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+            const resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
+            const timeLocation = gl.getUniformLocation(program, 'u_time');
+
+            gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+
+            let time = 0;
+            function render() {
+                if (renderer) renderer();
+                
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas2d);
+                gl.uniform2f(resolutionLocation, glCanvas.width, glCanvas.height);
+                gl.uniform1f(timeLocation, time);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                time += 0.05;
+                requestAnimationFrame(render);
+            }
+            render();
+
+            return {
+                canvas2d,
+                glCanvas,
+                ctx,
+                gl
+            };
+        }
+
+        const effects = {
+            distort: { value: 0.005 },
+            scanlines: { size: 1.0, gap: 0.02 },
+            vsync: { width: 0.2, scale: 0.5 },
+            specular: { lightPos: [0.2, 0.8], center: 0.5, color: [1.0, 1.0, 1.0] },
+            vignette: { value: 0.01 },
+            tint: { red: 1.0, green: 0.95, blue: 0.98 },
+            exposure: { value: 1.2 },
+            contrast: { value: 1.2 },
+            gamma: { value: 1.1 },
+            brightness: { value: 0.05 },
+            chromatic: { value: 0.005 },
+            curve: { angle: 6.0, offset: 4.0 },
+        };
+
+        const result = attachCanvasEffects(document.getElementById('drawCanvas'), effects, draw);
+        if (!result) {
+            console.log('Failed to initialize canvas effects');
+        }
+        
+        const { canvas2d, glCanvas, ctx, gl } = result;
+
+        let drawing = false;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.src = 'https://picsum.photos/600/800';
+        img.onload = () => {
+            ctx.drawImage(img, 0, 0, canvas2d.width, canvas2d.height);
+        };        
+
+        function randomColor() {
+            return `hsl(${Math.random() * 360}, 100%, 50%)`;
+        }
+
+        document.addEventListener('mousedown', (e) => {
+            drawing = true;
+            ctx.beginPath();
+            ctx.strokeStyle = randomColor();
+            ctx.moveTo(e.clientX, e.clientY);
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (drawing) {
+                ctx.lineTo(e.clientX, e.clientY);
+                ctx.stroke();
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            drawing = false;
+        });
+    </script>
+</body>
+</html>
