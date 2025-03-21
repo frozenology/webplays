@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Rotating Cube with Mouse Drag</title>
+    <style>
+      body { background: black; }
+        #container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            
+        }
+        canvas {
+            border: none;
+            cursor: move;
+            width: 100%;
+            height: auto;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            const container = document.getElementById('container');
+            canvas.width = container.clientWidth * 0.5;
+            canvas.height = canvas.width;
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        const vertices = [
+            [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+            [-1, -1, 1],  [1, -1, 1],  [1, 1, 1],  [-1, 1, 1]
+        ];
+        
+        const edges = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]
+        ];
+        
+        let angleX = 0;
+        let angleY = 0;
+        let velocityX = 0;
+        let velocityY = 0;
+        let isDragging = false;
+        let previousX;
+        let previousY;
+        
+        function rotateX(point, angle) {
+            const y = point[1] * Math.cos(angle) - point[2] * Math.sin(angle);
+            const z = point[1] * Math.sin(angle) + point[2] * Math.cos(angle);
+            return [point[0], y, z];
+        }
+        
+        function rotateY(point, angle) {
+            const x = point[0] * Math.cos(angle) + point[2] * Math.sin(angle);
+            const z = -point[0] * Math.sin(angle) + point[2] * Math.cos(angle);
+            return [x, point[1], z];
+        }
+        
+        function project(point) {
+            const scale = canvas.width * 1.4;
+            const distance = 5;
+            const perspective = scale / (distance - point[2]);
+            return [
+                point[0] * perspective + canvas.width / 2,
+                point[1] * perspective + canvas.height / 2
+            ];
+        }
+        
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousX = e.clientX;
+            previousY = e.clientY;
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.clientX - previousX;
+                const deltaY = e.clientY - previousY;
+                
+                velocityX = deltaX * 0.005;
+                velocityY = deltaY * 0.005;
+                
+                angleY += velocityX;
+                angleX += velocityY;
+                
+                previousX = e.clientX;
+                previousY = e.clientY;
+            }
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+        
+        function getRainbowColor(index) {
+            const hue = (index * 30 + Date.now() * 0.05) % 360;
+            //return `hsl(${hue}, 100%, 50%)`;
+          return `rgba(132,205,255,7)`;
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const rotatedVertices = vertices.map(vertex => {
+                let point = rotateX(vertex, angleX);
+                point = rotateY(point, angleY);
+                return project(point);
+            });
+            
+            edges.forEach(([i, j], index) => {
+                // Bloom effect with multiple passes
+                for (let blur = 2; blur >= 0; blur--) {
+                    ctx.beginPath();
+                    ctx.moveTo(rotatedVertices[i][0], rotatedVertices[i][1]);
+                    ctx.lineTo(rotatedVertices[j][0], rotatedVertices[j][1]);
+                    ctx.strokeStyle = getRainbowColor(index);
+                    ctx.lineWidth = 3 + blur * 2;
+                    ctx.shadowBlur = 10 + blur * 5;
+                    ctx.shadowColor = getRainbowColor(index);
+                    ctx.globalAlpha = 0.3 + blur * 0.2;
+                    ctx.stroke();
+                }
+            });
+            ctx.globalAlpha = 1.0;
+            ctx.shadowBlur = 0;
+            
+            if (!isDragging) {
+                if (Math.abs(velocityX) > 0.001 || Math.abs(velocityY) > 0.001) {
+                    angleX += velocityX;
+                    angleY += velocityY;
+                    velocityX *= 0.95;
+                    velocityY *= 0.95;
+                } else {
+                    angleX += Math.sin(Date.now() * 0.001) * 0.005;
+                    angleY += Math.cos(Date.now() * 0.001) * 0.005;
+                }
+            }
+            
+            requestAnimationFrame(draw);
+        }
+        
+        draw();
+    </script>
+</body>
+</html>
