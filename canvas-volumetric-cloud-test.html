@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Volumetric Cloud</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Check if canvas context is available
+        if (!ctx) {
+            console.error('Canvas context not supported');
+            alert('Canvas is not supported in your browser.');
+            throw new Error('Canvas context not available');
+        }
+
+        // Create a smaller off-screen canvas for rendering
+        const smallCanvas = document.createElement('canvas');
+        smallCanvas.width = 480;
+        smallCanvas.height = 270;
+        const smallCtx = smallCanvas.getContext('2d');
+
+        // Resize canvas to fit window
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Redraw immediately after resize
+            draw();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Simple 3D noise function for cloud density
+        function noise3D(x, y, z) {
+            const val = Math.sin(x * 12.9898 + y * 78.233 + z * 57.913) * 43758.5453;
+            return (val - Math.floor(val)) * 0.5 + 0.2; // Adjusted for visibility
+        }
+
+        // Normalize a vector
+        function normalize(v) {
+            const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) || 1; // Prevent division by zero
+            return [v[0] / len, v[1] / len, v[2] / len];
+        }
+
+        // Ray-box intersection
+        function rayBoxIntersection(origin, dir, boxMin, boxMax) {
+            const t0 = [
+                (boxMin[0] - origin[0]) / (dir[0] || 0.0001), // Avoid division by zero
+                (boxMin[1] - origin[1]) / (dir[1] || 0.0001),
+                (boxMin[2] - origin[2]) / (dir[2] || 0.0001)
+            ];
+            const t1 = [
+                (boxMax[0] - origin[0]) / (dir[0] || 0.0001),
+                (boxMax[1] - origin[1]) / (dir[1] || 0.0001),
+                (boxMax[2] - origin[2]) / (dir[2] || 0.0001)
+            ];
+            const tmin = Math.max(Math.min(t0[0], t1[0]), Math.min(t0[1], t1[1]), Math.min(t0[2], t1[2]));
+            const tmax = Math.min(Math.max(t0[0], t1[0]), Math.max(t0[1], t1[1]), Math.max(t0[2], t1[2]));
+            if (tmin > tmax || tmax < 0) return null;
+            return [tmin, tmax];
+        }
+
+        let time = 0;
+        const scale = 5; // Reduced scale for smoother noise
+        const speed = 0.05; // Slower animation for clearer fluid effect
+
+        function draw() {
+            try {
+                time += 0.016; // Roughly 60 FPS
+                const W = smallCanvas.width;
+                const H = smallCanvas.height;
+                const imageData = smallCtx.createImageData(W, H);
+                const data = imageData.data;
+                const aspect = W / H;
+                const boxMin = [-1, -1, -1];
+                const boxMax = [1, 1, 1];
+                const skyColor = [135, 206, 235]; // Sky blue
+                const cloudColor = [255, 255, 255]; // White cloud
+
+                for (let py = 0; py < H; py++) {
+                    for (let px = 0; px < W; px++) {
+                        const x = (2 * px / W - 1) * aspect;
+                        const y = -(2 * py / H - 1); // Flip y-axis for correct orientation
+                        const dir = normalize([x, y, 1]);
+                        const tValues = rayBoxIntersection([0, 0, 0], dir, boxMin, boxMax);
+                        const index = (py * W + px) * 4;
+
+                        if (tValues) {
+                            const [t_enter, t_exit] = tValues;
+                            const numSteps = 30; // Increased steps for better quality
+                            const dt = (t_exit - t_enter) / numSteps;
+                            let alpha = 0;
+                            let t = t_enter;
+
+                            for (let i = 0; i < numSteps; i++) {
+                                const p = [dir[0] * t, dir[1] * t, dir[2] * t];
+                                const offsetP = [p[0] + time * speed, p[1], p[2]];
+                                const density = noise3D(offsetP[0] * scale, offsetP[1] * scale, offsetP[2] * scale);
+                                alpha += density * dt * 0.5; // Adjust density contribution
+                                t += dt;
+                            }
+
+                            alpha = Math.min(Math.max(alpha, 0), 1);
+                            data[index] = skyColor[0] * (1 - alpha) + cloudColor[0] * alpha;
+                            data[index + 1] = skyColor[1] * (1 - alpha) + cloudColor[1] * alpha;
+                            data[index + 2] = skyColor[2] * (1 - alpha) + cloudColor[2] * alpha;
+                            data[index + 3] = 255;
+                        } else {
+                            data[index] = skyColor[0];
+                            data[index + 1] = skyColor[1];
+                            data[index + 2] = skyColor[2];
+                            data[index + 3] = 255;
+                        }
+                    }
+                }
+
+                smallCtx.putImageData(imageData, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear main canvas
+                ctx.imageSmoothingEnabled = false; // Pixelated look for testing
+                ctx.drawImage(smallCanvas, 0, 0, canvas.width, canvas.height);
+            } catch (error) {
+                console.error('Rendering error:', error);
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        // Start animation
+        draw();
+    </script>
+</body>
+</html>
