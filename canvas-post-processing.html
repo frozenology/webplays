@@ -113,13 +113,13 @@
                         return color;
                     }
                 `,
-                specular: (params = { lightPos: [0.2, 0.8], center: 0.3, color: [1.0, 1.0, 1.0] }) => `
+                specular: (params = { lightPos: [0.2, 0.8], center: 0.3, color: [1.0, 1.0, 1.0], intensity: 0.25 }) => `
                     vec4 applySpecular(vec2 uv, vec4 color) {
                         vec2 lightPos = vec2(${params.lightPos[0]}, ${params.lightPos[1]});
                         vec2 toLight = lightPos - uv;
-                        float dist = length(toLight);
-                        float specular = pow(max(0.0, dot(normalize(toLight), vec2(0.0, 1.0))), 32.0);
-                        float specIntensity = smoothstep(${params.center}, 0.1, dist) * specular * 0.3;
+                        float dist = length(toLight) * .15;
+                        float specular = pow(max(0.0, dot(normalize(toLight), vec2(0.0, 1.0))), 2.0);
+                        float specIntensity = smoothstep(${params.center}, 0.1, dist) * specular * ${params.intensity};
                         color.rgb += vec3(${params.color[0]}, ${params.color[1]}, ${params.color[2]}) * specIntensity;
                         return color;
                     }
@@ -357,25 +357,26 @@
 
         const effects = {
             distort: { value: 0.005 },
-            scanlines: { size: 1.0, gap: 0.02 },
-            vsync: { width: 0.2, scale: 0.5 },
-            specular: { lightPos: [0.2, 0.8], center: 0.5, color: [1.0, 1.0, 1.0] },
-            vignette: { value: 0.01 },
             tint: { red: 1.0, green: 0.95, blue: 0.98 },
             exposure: { value: 1.2 },
             contrast: { value: 1.2 },
             gamma: { value: 1.1 },
             brightness: { value: 0.05 },
-            chromatic: { value: 0.005 },
+            chromatic: { value: 0.025 },
             curve: { angle: 6.0, offset: 4.0 },
+            vignette: { value: 0.101 },
+            scanlines: { size: 2.0, gap: 0.12 },
+            vsync: { width: 0.1, scale: 24 },
+            specular: { lightPos: [0.5, 1.0], center: 0.5, color: [1.0, 1.0, 1.0], intensity: 0.25 },
         };
 
-        const result = attachCanvasEffects(document.getElementById('drawCanvas'), effects, draw);
+        const result = attachCanvasEffects(document.getElementById('canvas'), effects, animate);
         if (!result) {
             console.log('Failed to initialize canvas effects');
         }
-        
-        const { canvas2d, glCanvas, ctx, gl } = result;
+
+        // for testing
+        const { canvas2d, glCanvas, ctx, gl } = result;        
 
         let drawing = false;
         ctx.lineWidth = 2;
